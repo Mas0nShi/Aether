@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS public.announcements (
     author_id character varying(36),
     is_active boolean DEFAULT true,
     is_pinned boolean DEFAULT false,
+    requires_ack boolean DEFAULT false NOT NULL,
     start_time timestamp with time zone,
     end_time timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -1379,7 +1380,68 @@ CREATE TABLE IF NOT EXISTS public.users (
     email_verified boolean NOT NULL,
     rate_limit integer,
     rate_limit_mode text DEFAULT 'system'::text NOT NULL,
+    privacy_policy_accepted_version character varying(64),
+    privacy_policy_accepted_at timestamp with time zone,
     metadata json
+);
+
+
+
+--
+-- Name: user_invite_codes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE IF NOT EXISTS public.user_invite_codes (
+    user_id character varying(64) NOT NULL,
+    invite_code character varying(64) NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+--
+-- Name: user_referrals; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE IF NOT EXISTS public.user_referrals (
+    id character varying(64) NOT NULL,
+    inviter_user_id character varying(64) NOT NULL,
+    invitee_user_id character varying(64) NOT NULL,
+    invite_code_snapshot character varying(64) NOT NULL,
+    source_json jsonb,
+    first_paid_order_id character varying(64),
+    first_paid_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+
+--
+-- Name: referral_rewards; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE IF NOT EXISTS public.referral_rewards (
+    id character varying(64) NOT NULL,
+    referral_id character varying(64) NOT NULL,
+    inviter_user_id character varying(64) NOT NULL,
+    invitee_user_id character varying(64) NOT NULL,
+    reward_type character varying(32) NOT NULL,
+    trigger_point character varying(64) NOT NULL,
+    source_order_id character varying(64),
+    idempotency_key character varying(128) NOT NULL,
+    amount_usd numeric(20,8) NOT NULL,
+    status character varying(32) DEFAULT 'pending'::character varying NOT NULL,
+    wallet_transaction_id character varying(64),
+    reversed_amount_usd numeric(20,8) DEFAULT 0 NOT NULL,
+    pending_reversal_amount_usd numeric(20,8) DEFAULT 0 NOT NULL,
+    failure_reason text,
+    admin_operator_id character varying(64),
+    admin_note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 

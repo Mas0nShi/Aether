@@ -262,6 +262,22 @@ impl GatewayDataState {
         }
     }
 
+    pub(crate) async fn list_required_unread_active_announcements(
+        &self,
+        user_id: &str,
+        now_unix_secs: u64,
+        limit: usize,
+    ) -> Result<Vec<StoredAnnouncement>, DataLayerError> {
+        match &self.announcement_reader {
+            Some(repository) => {
+                repository
+                    .list_required_unread_active_announcements(user_id, now_unix_secs, limit)
+                    .await
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
     pub(crate) async fn create_announcement(
         &self,
         record: CreateAnnouncementRecord,

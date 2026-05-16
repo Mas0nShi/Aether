@@ -582,6 +582,38 @@ CREATE INDEX IF NOT EXISTS idx_user_sessions_user_device ON public.user_sessions
 
 
 --
+-- Name: idx_user_referrals_inviter; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX IF NOT EXISTS idx_user_referrals_inviter ON public.user_referrals USING btree (inviter_user_id, created_at DESC);
+
+
+
+--
+-- Name: idx_user_referrals_invite_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX IF NOT EXISTS idx_user_referrals_invite_code ON public.user_referrals USING btree (invite_code_snapshot);
+
+
+
+--
+-- Name: idx_referral_rewards_inviter_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX IF NOT EXISTS idx_referral_rewards_inviter_status ON public.referral_rewards USING btree (inviter_user_id, status, created_at DESC);
+
+
+
+--
+-- Name: idx_referral_rewards_source_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX IF NOT EXISTS idx_referral_rewards_source_order ON public.referral_rewards USING btree (source_order_id);
+
+
+
+--
 -- Name: idx_video_tasks_external_id; Type: INDEX; Schema: public; Owner: -
 --
 
