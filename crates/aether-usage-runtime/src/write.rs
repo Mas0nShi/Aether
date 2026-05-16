@@ -2203,7 +2203,7 @@ fn apply_cancelled_usage_estimate(data: &mut UsageEventData) {
         .provider_request_body
         .as_ref()
         .or(data.request_body.as_ref())
-        .and_then(|value| estimate_request_usage(value, cancelled_usage_api_format(data)));
+        .and_then(estimate_request_usage);
 
     if positive_tokens(data.input_tokens) == 0 {
         if let Some(usage) = request_usage.as_ref() {
@@ -2233,12 +2233,6 @@ fn apply_cancelled_usage_estimate(data: &mut UsageEventData) {
             data.total_tokens = Some(total_tokens);
         }
     }
-}
-
-fn cancelled_usage_api_format(data: &UsageEventData) -> Option<&str> {
-    data.endpoint_api_format
-        .as_deref()
-        .or(data.api_format.as_deref())
 }
 
 fn apply_cancelled_request_cache_estimate(
@@ -2283,10 +2277,7 @@ struct EstimatedRequestUsage {
     cache_creation_ephemeral_1h_tokens: u64,
 }
 
-fn estimate_request_usage(
-    value: &Value,
-    api_format: Option<&str>,
-) -> Option<EstimatedRequestUsage> {
+fn estimate_request_usage(value: &Value) -> Option<EstimatedRequestUsage> {
     let preferred_total = match value {
         Value::Object(object) => [
             "instructions",
@@ -2317,9 +2308,6 @@ fn estimate_request_usage(
         ..EstimatedRequestUsage::default()
     };
     apply_explicit_request_cache_usage(value, &mut usage);
-    if usage.cache_read_tokens == 0 && request_has_openai_prompt_cache_key(value, api_format) {
-        usage.cache_read_tokens = usage.input_tokens;
-    }
     Some(usage)
 }
 
@@ -2385,25 +2373,6 @@ fn value_as_positive_u64(value: &Value) -> Option<u64> {
         .as_u64()
         .or_else(|| value.as_i64().and_then(|number| u64::try_from(number).ok()))
         .filter(|value| *value > 0)
-}
-
-fn request_has_openai_prompt_cache_key(value: &Value, api_format: Option<&str>) -> bool {
-    api_family_matches(api_format, "openai")
-        && value
-            .get("prompt_cache_key")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty())
-}
-
-fn api_family_matches(api_format: Option<&str>, expected: &str) -> bool {
-    api_format
-        .and_then(|value| {
-            value
-                .split_once(':')
-                .map(|(family, _)| family)
-                .or(Some(value))
-        })
-        .is_some_and(|family| family.eq_ignore_ascii_case(expected))
 }
 
 fn estimate_json_tokens(value: &Value) -> u64 {
@@ -3349,7 +3318,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_stream_usage_estimates_prompt_cache_read_tokens() {
+    fn cancelled_stream_usage_does_not_infer_cache_read_from_prompt_cache_key() {
         let request_body = json!({
             "model": "gpt-5.4",
             "input": "Use the cached project context and answer briefly",
@@ -3406,7 +3375,7 @@ mod tests {
             .expect("input estimate should exist");
 
         assert_eq!(event.event_type, UsageEventType::Cancelled);
-        assert_eq!(event.data.cache_read_input_tokens, Some(input_tokens));
+        assert_eq!(event.data.cache_read_input_tokens, None);
         assert_eq!(event.data.output_tokens, Some(4));
         assert_eq!(event.data.total_tokens, Some(input_tokens + 4));
     }
