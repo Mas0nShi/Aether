@@ -79,6 +79,7 @@ Vertex AI 的 Gemini API REST reference 使用 `aiplatform.googleapis.com` 或 r
 - Vertex AI Embed Content REST: <https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations.publishers.models/embedContent>
 - Vertex AI Predict REST: <https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations.publishers.models/predict>
 - Vertex AI REST resources: <https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations.publishers.models>
+- Vertex AI Model Garden publisher model list: <https://docs.cloud.google.com/vertex-ai/docs/reference/rest/v1beta1/publishers.models/list>
 - Vertex AI text embeddings API: <https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/text-embeddings-api>
 - Vertex AI OpenAI compatibility: <https://cloud.google.com/vertex-ai/generative-ai/docs/start/openai>
 
@@ -89,6 +90,9 @@ Vertex AI 的 Gemini API REST reference 使用 `aiplatform.googleapis.com` 或 r
   - 对 `global` location，可使用 `https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/...`
 - Vertex API key 路径可走：
   - `https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:{action}?key=...`
+- Vertex 模型目录拉取不是推理请求，必须走 Model Garden publisher list：
+  - `https://aiplatform.googleapis.com/v1beta1/publishers/{publisher}/models`
+  - 不得使用 `projects/{project}/locations/{location}/publishers/{publisher}/models`；`projects.locations.publishers.models` 资源没有 list 方法，只有 generate / stream / predict / embed 等动作。
 - Vertex 文本 embedding API 文档使用 `:predict`，请求体是 `instances[]`，可选参数在 `parameters` 下；响应是 `predictions[].embeddings.values`。
 - Vertex REST reference 也列出 `embedContent`，但 Aether 当前 text embedding 主链使用 text embeddings guide 和 Predict API 的 contract。
 - Vertex `instances[]` 是在线 Predict 请求体，不等同于异步 batch prediction job。模型级输入数量限制由 Vertex 返回；Aether 不把超出限制的请求静默改走其他产品面。
