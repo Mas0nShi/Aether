@@ -96,6 +96,71 @@
               {{ form.expires_at ? '到期后' + (form.auto_delete_on_expiry ? '自动删除' : '仅禁用') + '（当天 23:59 失效）' : '留空表示永不过期' }}
             </p>
           </div>
+
+          <!-- 额度 -->
+          <div class="space-y-2">
+            <Label class="text-sm font-medium">额度</Label>
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <Input
+                  v-if="!isEditMode && !form.unlimited_balance"
+                  id="form-balance"
+                  :model-value="form.initial_balance_usd ?? ''"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="初始额度 (USD)"
+                  class="h-10"
+                  @update:model-value="(v) => form.initial_balance_usd = parseNumberInput(v, { allowFloat: true, min: 0.01 })"
+                />
+                <span
+                  v-else
+                  class="flex h-10 w-full items-center rounded-lg border bg-background px-3 text-sm text-muted-foreground opacity-60"
+                >{{ balanceDisplayText }}</span>
+              </div>
+              <Switch
+                :model-value="form.unlimited_balance ?? false"
+                class="shrink-0"
+                @update:model-value="(v) => form.unlimited_balance = v"
+              />
+            </div>
+            <p
+              v-if="isEditMode"
+              class="text-xs text-muted-foreground"
+            >
+              {{ form.unlimited_balance ? '该 Key 当前使用独立无限额度。' : '该 Key 当前按独立钱包余额限制；增减金额请在列表页使用“资金”操作。' }}
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label
+              for="form-ip-rules"
+              class="text-sm font-medium"
+            >IP 限制</Label>
+            <Input
+              id="form-ip-rules"
+              v-model="form.ip_rules_text"
+              class="h-10"
+              placeholder="例如：203.0.113.10, 10.0.0.0/24, !10.0.0.13"
+            />
+            <p class="text-xs text-muted-foreground">
+              留空表示不限制；支持 IP、CIDR、IPv4 通配符、*，用 ! 前缀拒绝，多个规则用英文逗号分隔
+            </p>
+          </div>
+
+          <div class="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+            <div class="flex items-center justify-between gap-3">
+              <Label class="text-sm font-medium">敏感信息保护</Label>
+              <Switch v-model="form.chat_pii_redaction_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <Label class="text-sm font-medium">占位符说明</Label>
+              <Switch
+                v-model="form.chat_pii_redaction_placeholder_notice"
+                :disabled="!form.chat_pii_redaction_enabled"
+              />
+            </div>
+          </div>
         </div>
 
         <!-- 右侧：访问限制 -->
@@ -233,71 +298,6 @@
             </div>
             <p class="text-xs text-muted-foreground">
               留空表示不限制，填 0 也表示不限制并发
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label
-              for="form-ip-rules"
-              class="text-sm font-medium"
-            >IP 限制</Label>
-            <Input
-              id="form-ip-rules"
-              v-model="form.ip_rules_text"
-              class="h-10"
-              placeholder="例如：203.0.113.10, 10.0.0.0/24, !10.0.0.13"
-            />
-            <p class="text-xs text-muted-foreground">
-              留空表示不限制；支持 IP、CIDR、IPv4 通配符、*，用 ! 前缀拒绝，多个规则用英文逗号分隔
-            </p>
-          </div>
-
-          <div class="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-            <div class="flex items-center justify-between gap-3">
-              <Label class="text-sm font-medium">敏感信息保护</Label>
-              <Switch v-model="form.chat_pii_redaction_enabled" />
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <Label class="text-sm font-medium">占位符说明</Label>
-              <Switch
-                v-model="form.chat_pii_redaction_placeholder_notice"
-                :disabled="!form.chat_pii_redaction_enabled"
-              />
-            </div>
-          </div>
-
-          <!-- 额度 -->
-          <div class="space-y-2">
-            <Label class="text-sm font-medium">额度</Label>
-            <div class="flex items-center gap-3">
-              <div class="flex-1 min-w-0">
-                <Input
-                  v-if="!isEditMode && !form.unlimited_balance"
-                  id="form-balance"
-                  :model-value="form.initial_balance_usd ?? ''"
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  placeholder="初始额度 (USD)"
-                  class="h-10"
-                  @update:model-value="(v) => form.initial_balance_usd = parseNumberInput(v, { allowFloat: true, min: 0.01 })"
-                />
-                <span
-                  v-else
-                  class="flex h-10 w-full items-center rounded-lg border bg-background px-3 text-sm text-muted-foreground opacity-60"
-                >{{ balanceDisplayText }}</span>
-              </div>
-              <Switch
-                :model-value="form.unlimited_balance ?? false"
-                class="shrink-0"
-                @update:model-value="(v) => form.unlimited_balance = v"
-              />
-            </div>
-            <p
-              v-if="isEditMode"
-              class="text-xs text-muted-foreground"
-            >
-              {{ form.unlimited_balance ? '该 Key 当前使用独立无限额度。' : '该 Key 当前按独立钱包余额限制；增减金额请在列表页使用“资金”操作。' }}
             </p>
           </div>
         </div>
