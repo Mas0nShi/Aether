@@ -394,6 +394,39 @@
       </div>
 
       <div
+        v-if="resultImagePreviews.length > 0"
+        class="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3"
+      >
+        <div class="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>图片预览</span>
+          <span>{{ resultImagePreviews.length }} 张</span>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <button
+            v-for="(preview, index) in resultImagePreviews"
+            :key="`${preview.src}-${index}`"
+            type="button"
+            class="group overflow-hidden rounded-md border border-border/60 bg-background text-left transition-colors hover:border-primary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/70"
+            :title="preview.label"
+            @click="openImagePreview(preview)"
+          >
+            <div class="aspect-square w-full overflow-hidden bg-muted/30">
+              <img
+                :src="preview.src"
+                :alt="preview.label"
+                class="h-full w-full object-contain"
+                loading="lazy"
+              >
+            </div>
+            <div class="flex items-center justify-between gap-2 border-t border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+              <span>{{ preview.label }}</span>
+              <span>{{ preview.source === 'base64' ? 'base64' : 'URL' }}</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div
         v-if="shouldCollapseAttempts"
         class="flex items-center justify-between gap-3 text-xs text-muted-foreground"
       >
@@ -935,11 +968,17 @@ const activeImagePreview = ref<ModelTestImagePreview | null>(null)
 
 watch(() => props.result, () => {
   showAllAttempts.value = false
-  inspectionTab.value = 'request-body'
   inspectionExpandDepth.value = 0
   inspectionCopiedStates.value = {}
-  const defaultAttempt = inspectableAttempts.value[0] ?? resultAttempts.value[0] ?? null
+  const defaultAttempt = resultImageAttempt.value
+    ?? resultAttempts.value.find(attempt => attempt.status === 'success')
+    ?? inspectableAttempts.value[0]
+    ?? resultAttempts.value[0]
+    ?? null
   selectedInspectionKey.value = defaultAttempt ? inspectionKey(defaultAttempt) : null
+  inspectionTab.value = defaultAttempt && attemptImagePreviews(defaultAttempt).length > 0
+    ? 'response-body'
+    : 'request-body'
 })
 
 const shouldCollapseAttempts = computed(() => resultAttempts.value.length > 20)
@@ -1251,6 +1290,18 @@ const selectedInspectionImagePreviews = computed(() => (
     : []
 ))
 
+const resultImageAttempt = computed(() => {
+  return resultAttempts.value.find(attempt => attempt.status === 'success' && attemptImagePreviews(attempt).length > 0)
+    ?? resultAttempts.value.find(attempt => attemptImagePreviews(attempt).length > 0)
+    ?? null
+})
+
+const resultImagePreviews = computed(() => (
+  resultImageAttempt.value
+    ? extractModelTestImagePreviews(resultImageAttempt.value.response_body)
+    : []
+))
+
 const resultWinningTitle = computed(() => {
   const summary = resultSummary.value
   const keyName = summary.winning_key_name || summary.winning_key_id
@@ -1432,7 +1483,7 @@ function inspectionKey(attempt: TestAttemptDetail): string {
 
 function selectInspectionAttempt(attempt: TestAttemptDetail) {
   selectedInspectionKey.value = inspectionKey(attempt)
-  inspectionTab.value = 'request-body'
+  inspectionTab.value = attemptImagePreviews(attempt).length > 0 ? 'response-body' : 'request-body'
 }
 
 function hasDebugData(attempt: TestAttemptDetail): boolean {
