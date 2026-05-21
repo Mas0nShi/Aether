@@ -1291,6 +1291,8 @@ pub struct OpenAIChatClientEmitter {
     model: Option<String>,
     started: bool,
     finished: bool,
+    next_tool_call_index: usize,
+    tool_call_index_by_canonical: BTreeMap<usize, usize>,
 }
 
 #[derive(Clone, Default)]
@@ -1355,6 +1357,17 @@ impl OpenAIChatClientEmitter {
                 self.model.as_deref().unwrap_or("unknown"),
             ),
         )
+    }
+
+    fn chat_tool_call_index(&mut self, canonical_index: usize) -> usize {
+        if let Some(index) = self.tool_call_index_by_canonical.get(&canonical_index) {
+            return *index;
+        }
+        let index = self.next_tool_call_index;
+        self.next_tool_call_index += 1;
+        self.tool_call_index_by_canonical
+            .insert(canonical_index, index);
+        index
     }
 
     pub fn emit(&mut self, frame: CanonicalStreamFrame) -> Result<Vec<u8>, AiSurfaceFinalizeError> {
@@ -1465,6 +1478,7 @@ impl OpenAIChatClientEmitter {
                 name,
             } => {
                 let mut out = self.ensure_started()?;
+                let chat_index = self.chat_tool_call_index(index);
                 out.extend(encode_json_sse(
                     None,
                     &build_openai_chat_chunk(
@@ -1474,7 +1488,7 @@ impl OpenAIChatClientEmitter {
                         self.model.as_deref().unwrap_or("unknown"),
                         String::new(),
                         Some(vec![json!({
-                            "index": index,
+                            "index": chat_index,
                             "id": call_id,
                             "type": "function",
                             "function": {
@@ -1489,6 +1503,7 @@ impl OpenAIChatClientEmitter {
             }
             CanonicalStreamEvent::ToolCallArgumentsDelta { index, arguments } => {
                 let mut out = self.ensure_started()?;
+                let chat_index = self.chat_tool_call_index(index);
                 out.extend(encode_json_sse(
                     None,
                     &json!({
@@ -1501,7 +1516,7 @@ impl OpenAIChatClientEmitter {
                             "index": 0,
                             "delta": {
                                 "tool_calls": [{
-                                    "index": index,
+                                    "index": chat_index,
                                     "function": {
                                         "arguments": arguments,
                                     }
@@ -2588,6 +2603,27 @@ mod tests {
         parts
     }
 
+    fn openai_chat_tool_call_indices(sse: &str) -> Vec<u64> {
+        let mut indices = Vec::new();
+        for payload in sse.lines().filter_map(|line| line.strip_prefix("data: ")) {
+            let Ok(value) = serde_json::from_str::<Value>(payload) else {
+                continue;
+            };
+            let Some(tool_calls) = value
+                .pointer("/choices/0/delta/tool_calls")
+                .and_then(Value::as_array)
+            else {
+                continue;
+            };
+            for tool_call in tool_calls {
+                if let Some(index) = tool_call.get("index").and_then(Value::as_u64) {
+                    indices.push(index);
+                }
+            }
+        }
+        indices
+    }
+
     #[test]
     fn openai_chat_provider_state_emits_unknown_events_for_unrecognized_deltas() {
         let mut state = OpenAIChatProviderState::default();
@@ -3248,6 +3284,50 @@ mod tests {
 
         let sse = String::from_utf8(bytes).expect("sse should be utf8");
         assert!(sse.contains("[Image]"));
+    }
+
+    #[test]
+    fn openai_chat_client_emitter_normalizes_sparse_tool_call_indices() {
+        let mut emitter = OpenAIChatClientEmitter::default();
+        let mut bytes = Vec::new();
+
+        for event in [
+            CanonicalStreamEvent::ToolCallStart {
+                index: 1,
+                call_id: "call_first".to_string(),
+                name: "first_tool".to_string(),
+            },
+            CanonicalStreamEvent::ToolCallArgumentsDelta {
+                index: 1,
+                arguments: "{\"first\":".to_string(),
+            },
+            CanonicalStreamEvent::ToolCallStart {
+                index: 3,
+                call_id: "call_second".to_string(),
+                name: "second_tool".to_string(),
+            },
+            CanonicalStreamEvent::ToolCallArgumentsDelta {
+                index: 3,
+                arguments: "{\"second\":true}".to_string(),
+            },
+            CanonicalStreamEvent::ToolCallArgumentsDelta {
+                index: 1,
+                arguments: "true}".to_string(),
+            },
+        ] {
+            bytes.extend(
+                emitter
+                    .emit(CanonicalStreamFrame {
+                        id: "chatcmpl_sparse".to_string(),
+                        model: "claude-opus-4-6".to_string(),
+                        event,
+                    })
+                    .expect("tool event should encode"),
+            );
+        }
+
+        let sse = String::from_utf8(bytes).expect("sse should be utf8");
+        assert_eq!(openai_chat_tool_call_indices(&sse), vec![0, 0, 1, 1, 0]);
     }
 
     #[test]

@@ -700,6 +700,18 @@ fn should_replace_stream_usage(
     observed.is_more_complete_than(current)
 }
 
+fn stream_terminal_summary_missing_observed_finish(
+    summary: Option<&ExecutionStreamTerminalSummary>,
+) -> bool {
+    summary.is_some_and(|summary| {
+        !summary.observed_finish
+            && !summary
+                .standardized_usage
+                .as_ref()
+                .is_some_and(StandardizedUsage::has_token_signal)
+    })
+}
+
 async fn execute_in_process_stream(
     state: &AppState,
     plan: &ExecutionPlan,
@@ -3320,6 +3332,8 @@ async fn execute_stream_from_frame_stream(
             report_context_owned.as_ref(),
             &mut stream_terminal_summary,
         );
+        let missing_observed_finish =
+            stream_terminal_summary_missing_observed_finish(stream_terminal_summary.as_ref());
 
         let should_submit_report = report_kind_owned.is_some();
         let terminal_telemetry = Some(build_terminal_stream_telemetry(
@@ -3341,35 +3355,47 @@ async fn execute_stream_from_frame_stream(
             stream_terminal_summary,
             terminal_telemetry,
         );
-        apply_local_execution_effect(
-            &state_for_report,
-            LocalExecutionEffectContext {
-                plan: &plan_for_report,
-                report_context: usage_payload.report_context.as_ref(),
-            },
-            LocalExecutionEffect::HealthSuccess(LocalHealthSuccessEffect),
-        )
-        .await;
-        apply_local_execution_effect(
-            &state_for_report,
-            LocalExecutionEffectContext {
-                plan: &plan_for_report,
-                report_context: usage_payload.report_context.as_ref(),
-            },
-            LocalExecutionEffect::AdaptiveSuccess(LocalAdaptiveSuccessEffect),
-        )
-        .await;
-        apply_local_execution_effect(
-            &state_for_report,
-            LocalExecutionEffectContext {
-                plan: &plan_for_report,
-                report_context: usage_payload.report_context.as_ref(),
-            },
-            LocalExecutionEffect::PoolSuccessStream {
-                payload: &usage_payload,
-            },
-        )
-        .await;
+        if missing_observed_finish {
+            warn!(
+                event_name = "execution_runtime_stream_missing_terminal_event",
+                log_type = "ops",
+                trace_id = %trace_id_owned,
+                request_id = %request_id_for_report_log,
+                candidate_id = ?candidate_id_for_report.as_deref(),
+                status_code,
+                "gateway stream ended before provider terminal event"
+            );
+        } else {
+            apply_local_execution_effect(
+                &state_for_report,
+                LocalExecutionEffectContext {
+                    plan: &plan_for_report,
+                    report_context: usage_payload.report_context.as_ref(),
+                },
+                LocalExecutionEffect::HealthSuccess(LocalHealthSuccessEffect),
+            )
+            .await;
+            apply_local_execution_effect(
+                &state_for_report,
+                LocalExecutionEffectContext {
+                    plan: &plan_for_report,
+                    report_context: usage_payload.report_context.as_ref(),
+                },
+                LocalExecutionEffect::AdaptiveSuccess(LocalAdaptiveSuccessEffect),
+            )
+            .await;
+            apply_local_execution_effect(
+                &state_for_report,
+                LocalExecutionEffectContext {
+                    plan: &plan_for_report,
+                    report_context: usage_payload.report_context.as_ref(),
+                },
+                LocalExecutionEffect::PoolSuccessStream {
+                    payload: &usage_payload,
+                },
+            )
+            .await;
+        }
         record_stream_terminal_usage(
             &state_for_report,
             &plan_for_report,
@@ -3382,10 +3408,17 @@ async fn execute_stream_from_frame_stream(
             &plan_for_report,
             usage_payload.report_context.as_ref(),
             SchedulerRequestCandidateStatusUpdate {
-                status: RequestCandidateStatus::Success,
+                status: if missing_observed_finish {
+                    RequestCandidateStatus::Failed
+                } else {
+                    RequestCandidateStatus::Success
+                },
                 status_code: Some(status_code),
-                error_type: None,
-                error_message: None,
+                error_type: missing_observed_finish
+                    .then(|| "stream_missing_terminal_event".to_string()),
+                error_message: missing_observed_finish.then(|| {
+                    "execution runtime stream ended before provider terminal event".to_string()
+                }),
                 latency_ms: usage_payload
                     .telemetry
                     .as_ref()
@@ -3487,6 +3520,7 @@ mod tests {
         maybe_apply_kiro_prompt_cache_usage_to_stream_summary, merge_stream_terminal_summary,
         should_limit_direct_finalize_prefetch, should_probe_success_failover_before_stream,
         should_skip_direct_finalize_prefetch, stream_chunk_contains_sse_done,
+        stream_terminal_summary_missing_observed_finish,
     };
     use crate::control::GatewayControlDecision;
     use crate::tunnel::{tunnel_protocol, TunnelProxyConn};
@@ -3562,6 +3596,35 @@ mod tests {
         assert_eq!(merged.response_id.as_deref(), Some("resp_123"));
         assert!(merged.observed_finish);
         assert_eq!(merged.unknown_event_count, 3);
+    }
+
+    #[test]
+    fn detects_missing_observed_finish_only_without_usage_signal() {
+        assert!(stream_terminal_summary_missing_observed_finish(Some(
+            &ExecutionStreamTerminalSummary {
+                response_id: Some("resp_missing_finish".to_string()),
+                model: Some("gpt-5.5".to_string()),
+                observed_finish: false,
+                ..ExecutionStreamTerminalSummary::default()
+            }
+        )));
+
+        let mut usage = StandardizedUsage::new();
+        usage.output_tokens = 12;
+        assert!(!stream_terminal_summary_missing_observed_finish(Some(
+            &ExecutionStreamTerminalSummary {
+                standardized_usage: Some(usage),
+                observed_finish: false,
+                ..ExecutionStreamTerminalSummary::default()
+            }
+        )));
+        assert!(!stream_terminal_summary_missing_observed_finish(Some(
+            &ExecutionStreamTerminalSummary {
+                observed_finish: true,
+                ..ExecutionStreamTerminalSummary::default()
+            }
+        )));
+        assert!(!stream_terminal_summary_missing_observed_finish(None));
     }
 
     #[test]

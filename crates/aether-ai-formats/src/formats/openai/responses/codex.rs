@@ -165,14 +165,25 @@ fn inject_codex_default_variation_prompt(body_object: &mut serde_json::Map<Strin
     );
 }
 
-fn build_stable_codex_prompt_cache_key(user_api_key_id: &str) -> Option<String> {
-    let normalized = user_api_key_id.trim();
+fn build_stable_codex_prompt_cache_key_from_seed(kind: &str, seed: &str) -> Option<String> {
+    let normalized = seed.trim();
     if normalized.is_empty() {
         return None;
     }
 
+    let normalized_kind = kind
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+        .collect::<String>();
+    let normalized_kind = if normalized_kind.is_empty() {
+        "seed".to_string()
+    } else {
+        normalized_kind
+    };
     let namespace = format!(
-        "aether:codex:prompt-cache:{CODEX_PROMPT_CACHE_NAMESPACE_VERSION}:user:{normalized}"
+        "aether:codex:prompt-cache:{CODEX_PROMPT_CACHE_NAMESPACE_VERSION}:{normalized_kind}:{normalized}"
     );
     let mut hasher = Sha1::new();
     hasher.update(UUID_NAMESPACE_OID_BYTES);
@@ -184,6 +195,48 @@ fn build_stable_codex_prompt_cache_key(user_api_key_id: &str) -> Option<String> 
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Some(Uuid::from_bytes(bytes).to_string())
+}
+
+fn build_stable_codex_prompt_cache_key(user_api_key_id: &str) -> Option<String> {
+    build_stable_codex_prompt_cache_key_from_seed("user", user_api_key_id)
+}
+
+fn extract_codex_prompt_cache_session_seed(provider_request_body: &Value) -> Option<String> {
+    fn non_empty_str(value: Option<&Value>) -> Option<&str> {
+        value
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn session_seed_from_metadata(metadata: &Value) -> Option<String> {
+        let object = metadata.as_object()?;
+        non_empty_str(object.get("session_id"))
+            .or_else(|| non_empty_str(object.get("sessionId")))
+            .or_else(|| non_empty_str(object.get("conversation_id")))
+            .or_else(|| non_empty_str(object.get("conversationId")))
+            .map(|value| format!("metadata:{value}"))
+            .or_else(|| {
+                let user_id = non_empty_str(object.get("user_id"))?;
+                serde_json::from_str::<Value>(user_id)
+                    .ok()
+                    .and_then(|decoded| {
+                        non_empty_str(decoded.get("session_id"))
+                            .or_else(|| non_empty_str(decoded.get("sessionId")))
+                            .or_else(|| non_empty_str(decoded.get("conversation_id")))
+                            .or_else(|| non_empty_str(decoded.get("conversationId")))
+                            .map(|value| format!("metadata.user_id:{value}"))
+                    })
+            })
+    }
+
+    let object = provider_request_body.as_object()?;
+    non_empty_str(object.get("session_id"))
+        .or_else(|| non_empty_str(object.get("sessionId")))
+        .or_else(|| non_empty_str(object.get("conversation_id")))
+        .or_else(|| non_empty_str(object.get("conversationId")))
+        .map(|value| format!("body:{value}"))
+        .or_else(|| object.get("metadata").and_then(session_seed_from_metadata))
 }
 
 fn build_short_codex_header_id(seed: &str) -> Option<String> {
@@ -271,11 +324,7 @@ fn maybe_inject_codex_prompt_cache_key(
         return;
     }
 
-    let Some(body_object) = provider_request_body.as_object_mut() else {
-        return;
-    };
-
-    let existing = body_object
+    let existing = provider_request_body
         .get("prompt_cache_key")
         .and_then(Value::as_str)
         .map(str::trim)
@@ -284,8 +333,14 @@ fn maybe_inject_codex_prompt_cache_key(
         return;
     }
 
-    let Some(prompt_cache_key) = user_api_key_id.and_then(build_stable_codex_prompt_cache_key)
-    else {
+    let prompt_cache_key = extract_codex_prompt_cache_session_seed(provider_request_body)
+        .and_then(|seed| build_stable_codex_prompt_cache_key_from_seed("session", &seed))
+        .or_else(|| user_api_key_id.and_then(build_stable_codex_prompt_cache_key));
+    let Some(prompt_cache_key) = prompt_cache_key else {
+        return;
+    };
+
+    let Some(body_object) = provider_request_body.as_object_mut() else {
         return;
     };
 
@@ -431,6 +486,13 @@ pub fn apply_codex_openai_responses_special_body_edits(
         return;
     }
 
+    maybe_inject_codex_prompt_cache_key(
+        provider_request_body,
+        provider_type,
+        provider_api_format,
+        user_api_key_id,
+    );
+
     let Some(body_object) = provider_request_body.as_object_mut() else {
         return;
     };
@@ -478,13 +540,6 @@ pub fn apply_codex_openai_responses_special_body_edits(
         apply_codex_openai_image_tool_overrides(body_object);
         inject_codex_default_variation_prompt(body_object);
     }
-
-    maybe_inject_codex_prompt_cache_key(
-        provider_request_body,
-        provider_type,
-        provider_api_format,
-        user_api_key_id,
-    );
 }
 
 pub fn apply_codex_openai_responses_chat_body_edits(
@@ -746,6 +801,57 @@ mod tests {
             provider_request_body["tool_choice"]["type"],
             json!("web_search")
         );
+    }
+
+    #[test]
+    fn codex_responses_body_edits_derive_prompt_cache_key_from_session_metadata() {
+        let mut body_a = json!({
+            "input": [{"role": "user", "content": "hello"}],
+            "model": "gpt-5.4",
+            "metadata": {
+                "user_id": "{\"session_id\":\"session-a\",\"device_id\":\"device-a\"}"
+            }
+        });
+        let mut body_b = json!({
+            "input": [{"role": "user", "content": "hello again"}],
+            "model": "gpt-5.4",
+            "metadata": {
+                "user_id": "{\"session_id\":\"session-a\",\"device_id\":\"device-b\"}"
+            }
+        });
+        let mut body_c = json!({
+            "input": [{"role": "user", "content": "hello"}],
+            "model": "gpt-5.4",
+            "metadata": {"session_id": "session-b"}
+        });
+
+        apply_codex_openai_responses_special_body_edits(
+            &mut body_a,
+            "codex",
+            "openai:responses",
+            None,
+            Some("key-123"),
+        );
+        apply_codex_openai_responses_special_body_edits(
+            &mut body_b,
+            "codex",
+            "openai:responses",
+            None,
+            Some("different-key"),
+        );
+        apply_codex_openai_responses_special_body_edits(
+            &mut body_c,
+            "codex",
+            "openai:responses",
+            None,
+            Some("key-123"),
+        );
+
+        assert_eq!(body_a["prompt_cache_key"], body_b["prompt_cache_key"]);
+        assert_ne!(body_a["prompt_cache_key"], body_c["prompt_cache_key"]);
+        assert!(body_a.get("metadata").is_none());
+        assert!(body_b.get("metadata").is_none());
+        assert!(body_c.get("metadata").is_none());
     }
 
     #[test]

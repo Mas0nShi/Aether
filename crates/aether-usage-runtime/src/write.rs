@@ -158,6 +158,7 @@ pub struct StreamTerminalUsagePayloadSeed {
     pub client_response: Option<Value>,
     pub client_response_body_state: Option<UsageBodyCaptureState>,
     pub standardized_usage: Option<StandardizedUsage>,
+    pub observed_stream_finish: Option<bool>,
     pub capture_metadata: Option<Value>,
 }
 
@@ -779,6 +780,10 @@ pub fn build_stream_terminal_usage_payload_seed(
     let provider_response_headers = context_usage_value(context, "provider_response_headers")
         .or_else(|| headers_to_json(&payload.headers));
     let client_response_headers = headers_to_json(&payload.headers);
+    let observed_stream_finish = payload
+        .terminal_summary
+        .as_ref()
+        .map(|summary| summary.observed_finish);
     StreamTerminalUsagePayloadSeed {
         report_kind: payload.report_kind.clone(),
         status_code: payload.status_code,
@@ -797,6 +802,7 @@ pub fn build_stream_terminal_usage_payload_seed(
             .terminal_summary
             .as_ref()
             .and_then(|summary| summary.standardized_usage.clone()),
+        observed_stream_finish,
         capture_metadata: build_payload_body_capture_metadata(
             payload.provider_body_base64.as_deref(),
             payload.client_body_base64.as_deref(),
@@ -894,6 +900,7 @@ pub fn build_stream_terminal_usage_seed(
         client_response,
         client_response_body_state,
         standardized_usage,
+        observed_stream_finish,
         capture_metadata,
     } = payload_seed;
     let standardized_usage = standardized_usage.or_else(|| {
@@ -901,7 +908,16 @@ pub fn build_stream_terminal_usage_seed(
             map_usage_from_response(response, context_seed.provider_contract.as_str())
         })
     });
-    let terminal_state = infer_stream_terminal_state(report_kind.as_str(), status_code, cancelled);
+    let missing_observed_finish = matches!(observed_stream_finish, Some(false))
+        && !standardized_usage
+            .as_ref()
+            .is_some_and(StandardizedUsage::has_token_signal);
+    let terminal_state = infer_stream_terminal_state(
+        report_kind.as_str(),
+        status_code,
+        cancelled,
+        missing_observed_finish,
+    );
 
     TerminalUsageSeed {
         terminal_state,
@@ -970,10 +986,11 @@ fn infer_stream_terminal_state(
     report_kind: &str,
     status_code: u16,
     cancelled: bool,
+    missing_observed_finish: bool,
 ) -> UsageTerminalState {
     if cancelled || status_code == 499 || report_kind.contains("cancel") {
         UsageTerminalState::Cancelled
-    } else if !(200..300).contains(&status_code) {
+    } else if !(200..300).contains(&status_code) || missing_observed_finish {
         UsageTerminalState::Failed
     } else {
         UsageTerminalState::Completed
@@ -3809,6 +3826,69 @@ mod tests {
         assert_eq!(event.data.cache_read_input_tokens, Some(3));
         assert!(event.data.response_body.is_none());
         assert!(event.data.client_response_body.is_none());
+    }
+
+    #[test]
+    fn stream_terminal_usage_marks_missing_observed_finish_as_failed() {
+        let plan = ExecutionPlan {
+            request_id: "req-stream-missing-finish-1".to_string(),
+            candidate_id: Some("cand-stream-missing-finish-1".to_string()),
+            provider_name: Some("OpenAI".to_string()),
+            provider_id: "provider-1".to_string(),
+            endpoint_id: "endpoint-1".to_string(),
+            key_id: "key-1".to_string(),
+            method: "POST".to_string(),
+            url: "https://example.com/v1/responses".to_string(),
+            headers: BTreeMap::new(),
+            content_type: None,
+            content_encoding: None,
+            body: RequestBody {
+                json_body: None,
+                body_bytes_b64: None,
+                body_ref: None,
+            },
+            stream: true,
+            client_api_format: "openai:responses".to_string(),
+            provider_api_format: "openai:responses".to_string(),
+            model_name: Some("gpt-5.5".to_string()),
+            proxy: None,
+            transport_profile: None,
+            timeouts: None,
+        };
+        let payload = GatewayStreamReportRequest {
+            trace_id: "trace-stream-missing-finish-1".to_string(),
+            report_kind: "openai_responses_stream_success".to_string(),
+            report_context: Some(json!({
+                "client_api_format": "openai:responses",
+                "provider_api_format": "openai:responses"
+            })),
+            status_code: 200,
+            headers: BTreeMap::new(),
+            provider_body_base64: None,
+            provider_body_state: Some(UsageBodyCaptureState::None),
+            client_body_base64: None,
+            client_body_state: Some(UsageBodyCaptureState::None),
+            terminal_summary: Some(ExecutionStreamTerminalSummary {
+                response_id: Some("resp_missing_finish".to_string()),
+                model: Some("gpt-5.5".to_string()),
+                observed_finish: false,
+                ..ExecutionStreamTerminalSummary::default()
+            }),
+            telemetry: None,
+        };
+
+        let event =
+            build_stream_terminal_usage_event(&plan, payload.report_context.as_ref(), &payload)
+                .expect("usage event should build");
+
+        assert_eq!(event.event_type, UsageEventType::Failed);
+        assert_eq!(event.data.status_code, Some(200));
+        assert_eq!(
+            event.data.error_category.as_deref(),
+            Some("non_success_status")
+        );
+        assert_eq!(event.data.input_tokens, None);
+        assert_eq!(event.data.output_tokens, None);
     }
 
     #[test]
