@@ -108,8 +108,7 @@ macro_rules! impl_materialized_usage_read_repository {
                 user_ids: &[String],
             ) -> Result<Vec<$crate::repository::usage::StoredUsageUserTotals>, $crate::DataLayerError>
             {
-                let repository = self.materialize_read_model().await?;
-                <$crate::repository::usage::InMemoryUsageReadRepository as $crate::repository::usage::UsageReadRepository>::summarize_usage_totals_by_user_ids(&repository, user_ids).await
+                <$repository>::summarize_usage_totals_by_user_ids(self, user_ids).await
             }
 
             async fn summarize_usage_cache_hit_summary(
@@ -163,8 +162,7 @@ macro_rules! impl_materialized_usage_read_repository {
                 $crate::repository::usage::StoredUsageDashboardSummary,
                 $crate::DataLayerError,
             > {
-                let repository = self.materialize_read_model().await?;
-                <$crate::repository::usage::InMemoryUsageReadRepository as $crate::repository::usage::UsageReadRepository>::summarize_dashboard_usage(&repository, query).await
+                <$repository>::summarize_dashboard_usage(self, query).await
             }
 
             async fn list_dashboard_daily_breakdown(
@@ -174,8 +172,7 @@ macro_rules! impl_materialized_usage_read_repository {
                 Vec<$crate::repository::usage::StoredUsageDashboardDailyBreakdownRow>,
                 $crate::DataLayerError,
             > {
-                let repository = self.materialize_read_model().await?;
-                <$crate::repository::usage::InMemoryUsageReadRepository as $crate::repository::usage::UsageReadRepository>::list_dashboard_daily_breakdown(&repository, query).await
+                <$repository>::list_dashboard_daily_breakdown(self, query).await
             }
 
             async fn summarize_dashboard_provider_counts(
@@ -349,8 +346,7 @@ macro_rules! impl_materialized_usage_read_repository {
                 Vec<$crate::repository::usage::StoredUsageDailySummary>,
                 $crate::DataLayerError,
             > {
-                let repository = self.materialize_read_model().await?;
-                <$crate::repository::usage::InMemoryUsageReadRepository as $crate::repository::usage::UsageReadRepository>::summarize_usage_daily_heatmap(&repository, query).await
+                <$repository>::summarize_usage_daily_heatmap(self, query).await
             }
         }
     };
