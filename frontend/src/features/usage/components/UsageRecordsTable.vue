@@ -200,7 +200,7 @@
               <Badge
                 v-if="getFastBadge(record)"
                 variant="outline"
-                class="h-4 rounded-full border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] leading-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+                class="h-4 rounded-full border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-900 shadow-sm dark:border-white/50 dark:bg-white dark:text-slate-950 flex-shrink-0"
                 :title="getFastBadgeTitle(record)"
               >
                 fast
@@ -587,7 +587,7 @@
                 <Badge
                   v-if="getFastBadge(record)"
                   variant="outline"
-                  class="h-4 rounded-full border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] leading-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+                  class="h-4 rounded-full border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-900 shadow-sm dark:border-white/50 dark:bg-white dark:text-slate-950 flex-shrink-0"
                   :title="getFastBadgeTitle(record)"
                 >
                   fast
@@ -623,7 +623,7 @@
               <Badge
                 v-if="getFastBadge(record)"
                 variant="outline"
-                class="h-4 rounded-full border-emerald-500/30 bg-emerald-500/10 px-1.5 text-[10px] leading-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+                class="h-4 rounded-full border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-900 shadow-sm dark:border-white/50 dark:bg-white dark:text-slate-950 flex-shrink-0"
                 :title="getFastBadgeTitle(record)"
               >
                 fast
