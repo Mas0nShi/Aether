@@ -1,5 +1,5 @@
 use super::super::payload::{
-    provider_query_extract_api_key_id, provider_query_extract_force_refresh,
+    provider_query_extract_api_key_ids, provider_query_extract_force_refresh,
     provider_query_extract_model, provider_query_extract_provider_id,
     provider_query_extract_request_id,
 };
@@ -860,7 +860,7 @@ async fn provider_query_select_preferred_non_kiro_endpoint(
     provider: &StoredProviderCatalogProvider,
     endpoints: &[StoredProviderCatalogEndpoint],
     keys: &[StoredProviderCatalogKey],
-    selected_key_id: Option<&str>,
+    selected_key_ids: Option<&BTreeSet<String>>,
 ) -> Option<StoredProviderCatalogEndpoint> {
     for priority in 0..=2 {
         for endpoint in endpoints.iter().filter(|endpoint| endpoint.is_active) {
@@ -873,7 +873,7 @@ async fn provider_query_select_preferred_non_kiro_endpoint(
             }
             for key in keys {
                 if !key.is_active
-                    || selected_key_id.is_some_and(|value| value != key.id.as_str())
+                    || !provider_query_selected_key_ids_allow_key(selected_key_ids, &key.id)
                     || !provider_query_key_supports_endpoint(
                         key,
                         &provider.provider_type,
@@ -905,7 +905,7 @@ async fn provider_query_select_preferred_non_kiro_endpoint(
             endpoint.is_active
                 && keys.iter().any(|key| {
                     key.is_active
-                        && selected_key_id.is_none_or(|value| value == key.id.as_str())
+                        && provider_query_selected_key_ids_allow_key(selected_key_ids, &key.id)
                         && provider_query_key_supports_endpoint(
                             key,
                             &provider.provider_type,
@@ -915,6 +915,22 @@ async fn provider_query_select_preferred_non_kiro_endpoint(
         })
         .or_else(|| endpoints.iter().find(|endpoint| endpoint.is_active))
         .cloned()
+}
+
+fn provider_query_selected_key_ids_allow_key(
+    selected_key_ids: Option<&BTreeSet<String>>,
+    key_id: &str,
+) -> bool {
+    selected_key_ids.is_none_or(|ids| ids.contains(key_id))
+}
+
+fn provider_query_selected_key_ids_all_exist(
+    selected_key_ids: &BTreeSet<String>,
+    keys: &[StoredProviderCatalogKey],
+) -> bool {
+    selected_key_ids
+        .iter()
+        .all(|id| keys.iter().any(|key| key.id == *id))
 }
 
 fn provider_query_test_key_sort_key(
@@ -1262,7 +1278,7 @@ async fn provider_query_build_kiro_test_candidates(
                 ADMIN_PROVIDER_QUERY_NO_ACTIVE_API_KEY_DETAIL,
             )
         })?;
-    let selected_key_id = provider_query_extract_api_key_id(payload);
+    let selected_key_ids = provider_query_extract_api_key_ids(payload);
     let requested_endpoint_id = provider_query_extract_endpoint_id(payload);
     let requested_api_format = provider_query_extract_api_format(payload);
     let endpoint = if requested_endpoint_id.is_none()
@@ -1274,7 +1290,7 @@ async fn provider_query_build_kiro_test_candidates(
             provider,
             &endpoints,
             &all_keys,
-            selected_key_id.as_deref(),
+            selected_key_ids.as_ref(),
         )
         .await
         .ok_or_else(|| {
@@ -1307,21 +1323,10 @@ async fn provider_query_build_kiro_test_candidates(
         }
     };
 
-    if let Some(api_key_id) = selected_key_id.as_deref() {
-        let Some(key) = all_keys.iter().find(|key| key.id == api_key_id) else {
+    if let Some(selected_key_ids) = selected_key_ids.as_ref() {
+        if !provider_query_selected_key_ids_all_exist(selected_key_ids, &all_keys) {
             return Err(build_admin_provider_query_not_found_response(
                 ADMIN_PROVIDER_QUERY_API_KEY_NOT_FOUND_DETAIL,
-            ));
-        };
-        if !key.is_active
-            || !provider_query_key_supports_endpoint(
-                key,
-                &provider.provider_type,
-                &endpoint.api_format,
-            )
-        {
-            return Err(build_admin_provider_query_not_found_response(
-                ADMIN_PROVIDER_QUERY_NO_ACTIVE_TEST_CANDIDATE_DETAIL,
             ));
         }
     }
@@ -1380,11 +1385,7 @@ async fn provider_query_build_kiro_test_candidates(
     let mut keys = all_keys
         .into_iter()
         .filter(|key| key.is_active)
-        .filter(|key| {
-            selected_key_id
-                .as_deref()
-                .is_none_or(|value| value == key.id.as_str())
-        })
+        .filter(|key| provider_query_selected_key_ids_allow_key(selected_key_ids.as_ref(), &key.id))
         .filter(|key| {
             provider_query_key_supports_endpoint(key, &provider.provider_type, &endpoint.api_format)
         })
