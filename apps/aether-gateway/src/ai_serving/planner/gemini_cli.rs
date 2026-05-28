@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::ai_serving::transport::gemini_cli::resolve_gemini_cli_project_id;
 use crate::ai_serving::transport::{
     build_gemini_cli_v1internal_request, build_standard_provider_request_headers,
-    GatewayProviderTransportSnapshot, GeminiCliRequestEnvelopeSupport,
-    StandardProviderRequestHeaders, StandardProviderRequestHeadersInput, GEMINI_CLI_USER_AGENT,
+    GatewayProviderTransportSnapshot, GeminiCliRequestAuth, GeminiCliRequestAuthSupport,
+    GeminiCliRequestEnvelopeSupport, StandardProviderRequestHeaders,
+    StandardProviderRequestHeadersInput, GEMINI_CLI_USER_AGENT,
 };
 use crate::AppState;
 
@@ -101,24 +101,33 @@ async fn build_gemini_cli_v1internal_payload(
     gemini_request_body: &Value,
 ) -> Result<GeminiCliV1InternalPayload, GeminiCliV1InternalRequestError> {
     let mut resolved_transport = Arc::clone(transport);
-    let project_id = match resolve_gemini_cli_project_id(&resolved_transport) {
-        Some(project_id) => Some(project_id),
-        None => match state
+    let mut auth = match crate::ai_serving::transport::resolve_local_gemini_cli_request_auth(
+        &resolved_transport,
+    ) {
+        GeminiCliRequestAuthSupport::Supported(auth) => auth,
+        GeminiCliRequestAuthSupport::Unsupported(_) => {
+            return Err(GeminiCliV1InternalRequestError::ProjectUnavailable);
+        }
+    };
+    if auth.project_id.is_none() {
+        auth = match state
             .hydrate_gemini_cli_project_metadata_for_transport(&resolved_transport)
             .await
         {
             Some(hydrated) => {
-                let project_id = resolve_gemini_cli_project_id(&hydrated);
                 resolved_transport = Arc::new(hydrated);
-                project_id
+                match crate::ai_serving::transport::resolve_local_gemini_cli_request_auth(
+                    &resolved_transport,
+                ) {
+                    GeminiCliRequestAuthSupport::Supported(auth) => auth,
+                    GeminiCliRequestAuthSupport::Unsupported(_) => GeminiCliRequestAuth::default(),
+                }
             }
-            None => None,
-        },
+            None => GeminiCliRequestAuth::default(),
+        };
     }
-    .ok_or(GeminiCliV1InternalRequestError::ProjectUnavailable)?;
-
     let body = match build_gemini_cli_v1internal_request(
-        &project_id,
+        &auth,
         trace_id,
         mapped_model,
         gemini_request_body,

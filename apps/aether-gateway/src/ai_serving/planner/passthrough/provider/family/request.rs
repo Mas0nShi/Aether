@@ -15,11 +15,11 @@ use crate::ai_serving::transport::antigravity::{
     classify_local_antigravity_request_support, AntigravityEnvelopeRequestType,
     AntigravityRequestEnvelopeSupport, AntigravityRequestSideSupport,
 };
-use crate::ai_serving::transport::gemini_cli::resolve_gemini_cli_project_id;
 use crate::ai_serving::transport::{
     build_gemini_cli_v1internal_request, build_grok_browser_headers, build_grok_upstream_url,
-    build_same_format_provider_headers, GeminiCliRequestEnvelopeSupport, GrokHeaderInput,
-    SameFormatProviderHeadersInput, GEMINI_CLI_USER_AGENT, GROK_CHAT_PATH,
+    build_same_format_provider_headers, resolve_local_gemini_cli_request_auth,
+    GeminiCliRequestAuth, GeminiCliRequestAuthSupport, GeminiCliRequestEnvelopeSupport,
+    GrokHeaderInput, SameFormatProviderHeadersInput, GEMINI_CLI_USER_AGENT, GROK_CHAT_PATH,
 };
 use crate::ai_serving::{CandidateFailureDiagnostic, GatewayProviderTransportSnapshot};
 use crate::{AppState, GatewayError};
@@ -71,6 +71,7 @@ pub(crate) fn resolve_same_format_provider_transport_unsupported_reason_for_trac
     );
     if !behavior.is_antigravity
         && !behavior.is_claude_code
+        && !behavior.is_gemini_cli
         && !behavior.is_vertex
         && !behavior.is_kiro
     {
@@ -238,35 +239,41 @@ pub(crate) async fn resolve_local_same_format_provider_candidate_payload_parts(
     } else {
         None
     };
-    let gemini_cli_project_id = if prepared.behavior.is_gemini_cli {
-        match resolve_gemini_cli_project_id(&transport) {
-            Some(project_id) => Some(project_id),
-            None => {
-                match state
-                    .hydrate_gemini_cli_project_metadata_for_transport(&transport)
-                    .await
-                {
-                    Some(hydrated) => {
-                        let project_id = resolve_gemini_cli_project_id(&hydrated);
-                        transport = Arc::new(hydrated);
-                        project_id
-                    }
-                    None => {
-                        mark_skipped_local_same_format_provider_candidate(
-                            state,
-                            input,
-                            trace_id,
-                            candidate,
-                            attempt.candidate_index,
-                            &attempt.candidate_id,
-                            "transport_auth_unavailable",
-                        )
-                        .await;
-                        return Ok(None);
+    let gemini_cli_auth = if prepared.behavior.is_gemini_cli {
+        let mut auth = match resolve_local_gemini_cli_request_auth(&transport) {
+            GeminiCliRequestAuthSupport::Supported(auth) => auth,
+            GeminiCliRequestAuthSupport::Unsupported(_) => {
+                mark_skipped_local_same_format_provider_candidate(
+                    state,
+                    input,
+                    trace_id,
+                    candidate,
+                    attempt.candidate_index,
+                    &attempt.candidate_id,
+                    "transport_auth_unavailable",
+                )
+                .await;
+                return Ok(None);
+            }
+        };
+        if auth.project_id.is_none() {
+            auth = match state
+                .hydrate_gemini_cli_project_metadata_for_transport(&transport)
+                .await
+            {
+                Some(hydrated) => {
+                    transport = Arc::new(hydrated);
+                    match resolve_local_gemini_cli_request_auth(&transport) {
+                        GeminiCliRequestAuthSupport::Supported(auth) => auth,
+                        GeminiCliRequestAuthSupport::Unsupported(_) => {
+                            GeminiCliRequestAuth::default()
+                        }
                     }
                 }
-            }
+                None => GeminiCliRequestAuth::default(),
+            };
         }
+        Some(auth)
     } else {
         None
     };
@@ -299,9 +306,9 @@ pub(crate) async fn resolve_local_same_format_provider_candidate_payload_parts(
                 return Ok(None);
             }
         }
-    } else if let Some(project_id) = gemini_cli_project_id.as_deref() {
+    } else if let Some(gemini_cli_auth) = gemini_cli_auth.as_ref() {
         match build_gemini_cli_v1internal_request(
-            project_id,
+            gemini_cli_auth,
             trace_id,
             &prepared.mapped_model,
             &base_provider_request_body,

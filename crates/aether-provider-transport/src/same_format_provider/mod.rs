@@ -128,6 +128,12 @@ pub fn classify_same_format_provider_request_behavior(
     );
     let report_kind = if is_kiro && !params.require_streaming {
         "claude_cli_sync_finalize"
+    } else if is_gemini_cli && !params.require_streaming {
+        match params.report_kind {
+            "gemini_chat_sync_success" => "gemini_chat_sync_finalize",
+            "gemini_cli_sync_success" => "gemini_cli_sync_finalize",
+            _ => params.report_kind,
+        }
     } else if is_antigravity && !params.require_streaming {
         match params.report_kind {
             "gemini_chat_sync_success" => "gemini_chat_sync_finalize",
@@ -408,6 +414,7 @@ pub fn same_format_provider_transport_unsupported_reason_for_trace(
     );
     if !behavior.is_antigravity
         && !behavior.is_claude_code
+        && !behavior.is_gemini_cli
         && !behavior.is_vertex
         && !behavior.is_kiro
     {
@@ -558,6 +565,19 @@ mod tests {
         assert!(behavior.is_antigravity);
         assert!(behavior.upstream_is_stream);
         assert_eq!(behavior.report_kind, "gemini_chat_sync_finalize");
+
+        let gemini_cli = sample_transport("gemini_cli");
+        let behavior = classify_same_format_provider_request_behavior(
+            &gemini_cli,
+            SameFormatProviderRequestBehaviorParams {
+                require_streaming: false,
+                provider_api_format: "gemini:generate_content",
+                report_kind: "gemini_cli_sync_success",
+            },
+        );
+
+        assert!(!behavior.upstream_is_stream);
+        assert_eq!(behavior.report_kind, "gemini_cli_sync_finalize");
     }
 
     #[test]

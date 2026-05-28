@@ -116,9 +116,12 @@ pub(crate) async fn resolve_local_openai_responses_candidate_payload_parts(
     let planner_state = PlannerAppState::new(state);
     let candidate = &eligible.candidate;
     let provider_api_format = eligible.provider_api_format.as_str();
+    let normalized_provider_api_format =
+        crate::ai_serving::normalize_api_format_alias(provider_api_format);
     let transport = &eligible.transport;
     let transport_profile = crate::ai_serving::transport::resolve_transport_profile(transport);
     let is_antigravity = is_antigravity_provider_transport(transport);
+    let is_gemini_cli = is_gemini_cli_provider_transport(transport);
     let is_kiro_claude_cli = is_kiro_claude_messages_transport(transport, provider_api_format);
     let is_grok = transport
         .provider
@@ -145,25 +148,29 @@ pub(crate) async fn resolve_local_openai_responses_candidate_payload_parts(
 
     let same_format = api_format_alias_matches(provider_api_format, &client_api_format);
     let conversion_kind = request_conversion_kind(spec_metadata.api_format, provider_api_format);
-    let transport_unsupported_reason = if is_grok
-        && is_grok_text_provider_api_format(provider_api_format)
-    {
-        None
-    } else if same_format && is_kiro_claude_cli {
-        local_kiro_request_transport_unsupported_reason_with_network(transport)
-    } else if same_format {
-        local_standard_transport_unsupported_reason_with_network(transport, provider_api_format)
-    } else if is_windsurf_cascade {
-        local_windsurf_request_transport_unsupported_reason_with_network(transport)
-    } else {
-        match conversion_kind {
-            Some(_) if is_antigravity && provider_api_format == "gemini:generate_content" => None,
-            Some(kind) => {
-                crate::ai_serving::request_conversion_transport_unsupported_reason(transport, kind)
+    let transport_unsupported_reason =
+        if is_grok && is_grok_text_provider_api_format(provider_api_format) {
+            None
+        } else if same_format && is_kiro_claude_cli {
+            local_kiro_request_transport_unsupported_reason_with_network(transport)
+        } else if same_format {
+            local_standard_transport_unsupported_reason_with_network(transport, provider_api_format)
+        } else if is_windsurf_cascade {
+            local_windsurf_request_transport_unsupported_reason_with_network(transport)
+        } else {
+            match conversion_kind {
+                Some(_)
+                    if (is_antigravity || is_gemini_cli)
+                        && normalized_provider_api_format == "gemini:generate_content" =>
+                {
+                    None
+                }
+                Some(kind) => crate::ai_serving::request_conversion_transport_unsupported_reason(
+                    transport, kind,
+                ),
+                None => Some("transport_api_format_unsupported"),
             }
-            None => Some("transport_api_format_unsupported"),
-        }
-    };
+        };
     if let Some(skip_reason) = transport_unsupported_reason {
         mark_skipped_local_openai_responses_candidate(
             state,

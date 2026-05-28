@@ -5027,10 +5027,10 @@ async fn gateway_handles_gemini_cli_test_model_with_oauth_header_fallback() {
             assert_eq!(plan.endpoint_id, "endpoint-gemini-cli");
             assert_eq!(plan.key_id, "key-gemini-cli");
             assert_eq!(plan.provider_api_format, "gemini:generate_content");
-            assert!(plan.stream);
+            assert!(!plan.stream);
             assert_eq!(
                 plan.url,
-                "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+                "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
             );
             assert_eq!(
                 plan.body.json_body.as_ref().unwrap()["project"],
@@ -5184,9 +5184,9 @@ async fn gateway_hydrates_gemini_cli_project_id_from_load_code_assist_for_test_m
 
                 assert_eq!(
                     plan.url,
-                    "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+                    "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
                 );
-                assert!(plan.stream);
+                assert!(!plan.stream);
                 assert_eq!(
                     plan.body.json_body.as_ref().unwrap()["project"],
                     json!("project-from-load-code-assist")
@@ -5286,8 +5286,7 @@ async fn gateway_hydrates_gemini_cli_project_id_from_load_code_assist_for_test_m
         *seen_urls.lock().expect("mutex should lock"),
         vec![
             "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist".to_string(),
-            "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
-                .to_string(),
+            "https://cloudcode-pa.googleapis.com/v1internal:generateContent".to_string(),
         ]
     );
     let reloaded = provider_catalog_repository
@@ -5496,10 +5495,10 @@ async fn gateway_unwraps_gemini_cli_v1internal_response_for_failover_model_test(
             assert_eq!(plan.endpoint_id, "endpoint-gemini-cli");
             assert_eq!(plan.key_id, "key-gemini-cli");
             assert_eq!(plan.provider_api_format, "gemini:generate_content");
-            assert!(plan.stream);
+            assert!(!plan.stream);
             assert_eq!(
                 plan.url,
-                "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+                "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
             );
             assert_eq!(
                 plan.body.json_body.as_ref().unwrap()["project"],
@@ -5514,15 +5513,30 @@ async fn gateway_unwraps_gemini_cli_v1internal_response_for_failover_model_test(
                 "candidate_id": plan.candidate_id,
                 "status_code": 200,
                 "headers": {
-                    "content-type": "text/event-stream"
+                    "content-type": "application/json"
                 },
                 "body": {
-                    "body_bytes_b64": base64::engine::general_purpose::STANDARD.encode(
-                        concat!(
-                            "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Gemini CLI v1internal failover response\"}],\"role\":\"model\"},\"finishReason\":\"STOP\",\"index\":0}],\"modelVersion\":\"gemini-3-flash-preview\",\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":5,\"totalTokenCount\":7}},\"remainingCredits\":123,\"consumedCredits\":1,\"traceId\":\"trace-gemini-cli-1\"}\n\n"
-                        )
-                        .as_bytes()
-                    )
+                    "json_body": {
+                        "response": {
+                            "candidates": [{
+                                "content": {
+                                    "parts": [{"text":"Gemini CLI v1internal failover response"}],
+                                    "role": "model"
+                                },
+                                "finishReason": "STOP",
+                                "index": 0
+                            }],
+                            "modelVersion": "gemini-3-flash-preview",
+                            "usageMetadata": {
+                                "promptTokenCount": 2,
+                                "candidatesTokenCount": 5,
+                                "totalTokenCount": 7
+                            }
+                        },
+                        "remainingCredits": 123,
+                        "consumedCredits": 1,
+                        "traceId": "trace-gemini-cli-1"
+                    }
                 },
                 "telemetry": {
                     "elapsed_ms": 23

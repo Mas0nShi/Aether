@@ -131,6 +131,7 @@ pub(crate) async fn resolve_local_openai_chat_candidate_payload_parts(
         .provider_type
         .trim()
         .eq_ignore_ascii_case("grok");
+    let is_gemini_cli = is_gemini_cli_provider_transport(transport);
 
     if is_grok && is_grok_text_provider_api_format(provider_api_format) {
         let prepared_candidate = match prepare_header_authenticated_candidate(
@@ -445,6 +446,8 @@ pub(crate) async fn resolve_local_openai_chat_candidate_payload_parts(
     };
 
     let provider_api_format = provider_api_format.trim().to_ascii_lowercase();
+    let normalized_provider_api_format =
+        crate::ai_serving::normalize_api_format_alias(provider_api_format.as_str());
     if provider_api_format == "openai:image" {
         return resolve_openai_chat_to_openai_image_payload_parts(
             state,
@@ -479,17 +482,19 @@ pub(crate) async fn resolve_local_openai_chat_candidate_payload_parts(
         transport,
         conversion_kind,
     ) {
-        mark_skipped_local_openai_chat_candidate(
-            state,
-            input,
-            trace_id,
-            candidate,
-            candidate_index,
-            candidate_id,
-            skip_reason,
-        )
-        .await;
-        return Ok(None);
+        if !(is_gemini_cli && normalized_provider_api_format == "gemini:generate_content") {
+            mark_skipped_local_openai_chat_candidate(
+                state,
+                input,
+                trace_id,
+                candidate,
+                candidate_index,
+                candidate_id,
+                skip_reason,
+            )
+            .await;
+            return Ok(None);
+        }
     }
     let is_kiro_claude_cli =
         is_kiro_claude_messages_transport(transport, provider_api_format.as_str());
