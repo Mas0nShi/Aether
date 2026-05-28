@@ -91,11 +91,6 @@ pub(crate) async fn maybe_build_local_same_format_provider_decision_payload_for_
             "envelope_name".to_string(),
             json!(crate::ai_serving::transport::kiro::KIRO_ENVELOPE_NAME),
         );
-    } else if resolved.is_gemini_cli {
-        extra_fields.insert(
-            "envelope_name".to_string(),
-            json!(aether_ai_formats::api::GEMINI_CLI_V1INTERNAL_ENVELOPE_NAME),
-        );
     } else if resolved.is_antigravity {
         extra_fields.insert(
             "envelope_name".to_string(),
